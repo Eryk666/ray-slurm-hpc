@@ -1,28 +1,43 @@
-from sklearn.datasets import make_classification
-from sklearn.model_selection import cross_val_score
+import os
+import pandas as pd
+from scipy.io import arff
 from xgboost import XGBClassifier
+from sklearn.model_selection import cross_val_score
 import numpy as np
 
-_X_train, _y_train = None, None
+_data_cache = None
 
 def get_dataset():
-    global _X_train, _y_train
-    if _X_train is None:
-        from sklearn.model_selection import train_test_split
-        X, y = make_classification(
-            n_samples=500, n_features=10,
-            n_informative=8, n_redundant=2,
-            n_classes=2, random_state=42
-        )
-        _X_train, _, _y_train, _ = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
-    print("dataset ready\n")
-    return _X_train, _y_train
+    global _data_cache
+    if _data_cache is None:
+        # Pull path from environment variable
+        data_path = os.environ.get("DATA_PATH")
+
+        # Load ARFF file
+        data, meta = arff.loadarff(data_path)
+        df = pd.DataFrame(data)
+
+        # ARFF strings are often byte-encoded (e.g., b'class_name')
+        # This decodes them if necessary
+        for col in df.columns:
+            if df[col].dtype == object:
+                df[col] = df[col].str.decode('utf-8')
+
+        # Assume the last column is the target (common in ARFF)
+        target_col = meta.names()[-1]
+        X = df.drop(target_col, axis=1)
+        y = df[target_col]
+
+        # Convert categorical target to numeric if it's not already
+        if y.dtype == object or y.dtype.name == 'category':
+            y = pd.factorize(y)[0]
+
+        _data_cache = (X, y)
+    return _data_cache
 
 def train_model(config):
     X_train, y_train = get_dataset()
-    
+
     model = XGBClassifier(
         n_estimators=config["n_estimators"],
         max_depth=config["max_depth"],

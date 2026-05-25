@@ -12,6 +12,7 @@ conda activate rayenv
 export RAY_TMPDIR=/tmp/ray_$SLURM_JOB_ID
 mkdir -p $RAY_TMPDIR
 export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
+export DATASET_PATH="$SCRATCH/3year.arff"
 
 nodes=($(scontrol show hostnames $SLURM_JOB_NODELIST))
 head=${nodes[0]}
