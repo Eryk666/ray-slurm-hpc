@@ -7,7 +7,7 @@ import numpy as np
 
 _data_cache = None
 
-def get_dataset(path): # Accept path as argument
+def get_dataset(): # Accept path as argument
     global _data_cache
     if _data_cache is None:
         # HARDCODED: Use the literal string from 'echo $SCRATCH'
@@ -37,7 +37,7 @@ def get_dataset(path): # Accept path as argument
     return _data_cache
 
 def train_model(config):
-    X, y = get_dataset(config["data_path"])
+    X, y = get_dataset()
 
     model = XGBClassifier(
         n_estimators=config["n_estimators"],
