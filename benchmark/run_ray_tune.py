@@ -19,7 +19,7 @@ scheduler = ASHAScheduler(
     metric="accuracy",
     mode="max",
     max_t=100,
-    grace_period=10 
+    grace_period=10
 )
 
 tuner = tune.Tuner(
@@ -27,7 +27,7 @@ tuner = tune.Tuner(
     param_space=search_space,
     tune_config=tune.TuneConfig(
         scheduler=scheduler,
-        num_samples=20
+        num_samples=40
     ),
     run_config=tune.RunConfig(
         name="xgb_hpo",

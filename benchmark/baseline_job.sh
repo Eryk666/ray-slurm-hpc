@@ -9,5 +9,4 @@
 
 conda activate rayenv
 
-
-python run_baseline.py
+python -u run_baseline.py
