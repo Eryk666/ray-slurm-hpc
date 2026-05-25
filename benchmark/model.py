@@ -50,6 +50,6 @@ def train_model(config):
     )
     print("training start\n")
 
-    scores = cross_val_score(model, X_train, y_train, cv=3, n_jobs=1)
+    scores = cross_val_score(model, X, y, cv=3, n_jobs=1)
     print("training end\n")
     return np.mean(scores)
