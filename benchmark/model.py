@@ -7,14 +7,15 @@ import numpy as np
 
 _data_cache = None
 
-def get_dataset():
+def get_dataset(path): # Accept path as argument
     global _data_cache
     if _data_cache is None:
-        # Pull path from environment variable
-        data_path = os.environ.get("DATA_PATH")
+        # HARDCODED: Use the literal string from 'echo $SCRATCH'
+        # Ensure the filename is exactly what is on disk (.arff)
+        path = "/net/afscra/people/plgolejarzeryk/3year.arff"
 
         # Load ARFF file
-        data, meta = arff.loadarff(data_path)
+        data, meta = arff.loadarff(path)
         df = pd.DataFrame(data)
 
         # ARFF strings are often byte-encoded (e.g., b'class_name')
@@ -36,7 +37,7 @@ def get_dataset():
     return _data_cache
 
 def train_model(config):
-    X_train, y_train = get_dataset()
+    X, y = get_dataset(config["data_path"])
 
     model = XGBClassifier(
         n_estimators=config["n_estimators"],
