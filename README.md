@@ -10,12 +10,6 @@
 
 Ray is an open-source, distributed execution framework designed to scale Python applications from a single laptop to a massive High-Performance Computing (HPC) cluster. It completely abstracts away the complexities of traditional network programming, socket management, and manual data synchronization.
 
-
-
-![image](./img/1693068477052.png)
-
-
-
 ### Key Components of Ray Architecture
 
 * **The Head Node:** The central orchestrator of the cluster. It hosts the Global Control Store (GCS), which tracks the location of data objects, worker states, and tasks across the entire network.
