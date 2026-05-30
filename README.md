@@ -21,7 +21,7 @@ Before diving into the code, you need to understand the architectural layer we a
 ---
 
 ### What is Ray Tune?
-Building on top of Ray's core ecosystem, **Ray Tune** is a library specifically engineered for hyperparameter tuning at scale. 
+Building on top of Ray's core ecosystem, **Ray Tune** is a library specifically engineered for hyperparameter tuning at scale.
 
 When training machine learning models, finding the optimal combination of configuration parameters (like learning rates, tree depths, or network architectures) requires running hundreds of independent training cycles. Ray Tune automates this process cleanly by turning hyperparameter search into a distributed scheduling problem.
 
@@ -67,7 +67,7 @@ To optimize machine learning pipelines on a cluster, you must understand what pa
 In machine learning, there is a fundamental distinction between two types of parameters:
 
 * **Model Parameters:** Internal configurations learned automatically by the algorithm from the training data during execution (e.g., split thresholds in a decision tree or weights in a neural network).
-* **Hyperparameters:** External configurations that you must set manually *before* training begins. These govern the structural complexity of the model and how aggressively it learns. 
+* **Hyperparameters:** External configurations that you must set manually *before* training begins. These govern the structural complexity of the model and how aggressively it learns.
 
 Because hyperparameters directly control the balance between **underfitting** (model is too simple) and **overfitting** (model memorizes noise in the training data), finding their optimal values is critical. Instead of manual guessing, we use automated search spaces to evaluate multiple configurations systematically.
 
@@ -85,7 +85,7 @@ Instead of training one massive, complex model, XGBoost uses an ensemble techniq
 
 ## 4. Model training
 
-Now that the architectural concepts are established, we can examine how they materialize in actual code. The following implementation represents the computational unit that Ray Tune will repeatedly execute across the cluster. 
+Now that the architectural concepts are established, we can examine how they materialize in actual code. The following implementation represents the computational unit that Ray Tune will repeatedly execute across the cluster.
 
 Unlike a traditional sequential machine learning script where data is loaded and a model is trained exactly once, Ray Tune transforms the training process into a **distributed trial execution system**, where the same training function is instantiated many times in parallel, each with a different hyperparameter configuration.
 
@@ -118,7 +118,7 @@ def train_model(config):
         max_depth=config["max_depth"],
         learning_rate=config["learning_rate"],
         tree_method="hist",
-        n_jobs=num_cpus,  
+        n_jobs=num_cpus,
         verbosity=0,
         random_state=42
     )
@@ -150,42 +150,32 @@ The underlying philosophy of random search is extremely simple:
 Below we can see the implementation of that:
 
 ```python
-def run_baseline_trial(trial_id,num_samples=50,seed=None):
-
+def run_baseline_trial(trial_id, num_samples=50 ,seed=None):
     if seed is None:
         seed=trial_id*42
-
     set_seeds(seed)
 
-    X,y=load_and_preprocess_data()
+    X, y = load_and_preprocess_data()
 
-    results=[]
+    results = []
 
     for i in range(num_samples):
 
-        config={
-
-            "n_estimators":
-            random.randint(100,1000),
-
-            "max_depth":
-            random.randint(4,15),
-
-            "learning_rate":
-            10**random.uniform(-4,-1),
-
-            "data_X":X,
-            "data_y":y,
-
-            "num_cpus":16
+        config = {
+            "n_estimators": random.randint(100, 1000),
+            "max_depth": random.randint(4, 15),
+            "learning_rate": 10 ** random.uniform(-4, -1),
+            "data_X": X,
+            "data_y": y,
+            "num_cpus": 16,
         }
 
-        score=train_model(config)
+        score = train_model(config)
 
         results.append(
             {
-                "config":config,
-                "accuracy":score
+                "config": config,
+                "accuracy": score,
             }
         )
 
@@ -207,16 +197,164 @@ To run this code on Ares we are going to use scrfipt dedicated for SLURM. In the
 conda activate rayenv
 
 python -u run_baseline.py
-``` 
+```
 
 As you can see script is pretty small and easy to understand.
-## 6. Ray 
+
+## 6. Ray
+
+Now we transition from the baseline to **Ray Tune**, which transforms your cluster into a single, cohesive optimization engine. While the baseline runs independent tasks that don't talk to each other, **Ray Tune** uses a centralized orchestrator to make "smart" decisions in real-time.
+
+We wrap our training logic in an objective function which reports results back to Ray using `tune.report()`. This feedback loop allows the scheduler to see how a trial is performing while it is still running.
+
+```python
+def objective(config):
+    start = time.time()
+
+    trainer_config = config.copy()
+    trainer_config["n_estimators"] = int(np.round(config["n_estimators"]))
+    trainer_config["max_depth"] = int(np.round(config["max_depth"]))
+
+    score = train_model(trainer_config)
+
+    duration = time.time() - start
+    resources_end = log_resources()
+
+    tune.report({
+        "accuracy": score,
+        "training_time": duration,
+        "cpu_usage": resources_end["cpu_percent"],
+        "memory_gb": resources_end["memory_gb"]
+    })
+```
+
+The dataset is moved into shared memory using `ray.put()`. This stores the data within the **Plasma Object Store**, making it accessible to all processes on the node. Workers receive a pointer and read the data directly from shared memory without creating redundant copies.
+
+Hyperparameter ranges are defined using a search space with distributions like `tune.uniform` and `tune.loguniform` to explore different model configurations.
+
+The tuner uses a scheduler (ASHA) that identifies and terminates underperforming trials early to conserve cluster resources.
+
+The next configuration to try is selected by the search algorithm, which uses performance data from previous trials to navigate toward more optimal areas of the search space.
+
+Finally, calling `tuner.fit()` launches the distributed execution, managing the parallel trials across the cluster.
+
+```python
+X, y = load_and_preprocess_data()
+
+X_ref = ray.put(X)
+y_ref = ray.put(y)
+
+search_space = {
+    "n_estimators": tune.uniform(100, 1000),
+    "max_depth": tune.uniform(4, 15),
+    "learning_rate": tune.loguniform(1e-4, 1e-1),
+    "data_X": X_ref,
+    "data_y": y_ref,
+    "num_cpus": 15,
+}
+
+scheduler = ASHAScheduler(
+    metric="accuracy",
+    mode="max",
+    max_t=100,
+    grace_period=10,
+    reduction_factor=3,
+    brackets=1
+)
+
+search_alg = BayesOptSearch(
+    metric="accuracy",
+    mode="max",
+    random_search_steps=4
+)
+
+tuner = tune.Tuner(
+        tune.with_resources(objective, {"cpu": 16}),
+        param_space=search_space,
+        tune_config=tune.TuneConfig(
+            scheduler=scheduler,
+            search_alg=search_alg,
+            num_samples=10,
+            max_concurrent_trials=4
+        ),
+        run_config=tune.RunConfig(
+            name="xgb_hpo",
+            storage_path=storage_path,
+            verbose=1
+        )
+    )
+
+results = tuner.fit()
+```
+
+Running Ray on an HPC cluster requires a bash script to bridge the gap between the Slurm manager and the Ray runtime. Since Slurm provides a set of raw, disconnected nodes, the script orchestrates a startup sequence to create a unified cluster, allowing the application to treat all CPUs as a single resource pool.
+
+The script first identifies the leading allocated node as the **Head Node** and captures its internal IP address. It then executes `ray start --head` on this machine to launch the **Global Control Store** (GCS), which centralizes cluster management and task scheduling.
+
+For the remaining nodes, the script executes `ray start --address` to connect them to the head node as Worker Nodes. This loop ensures that all hardware provided by Slurm is registered and ready to execute parallel training trials from Ray Tune.
+
+After the Python script finishes, the script calls `ray stop` to terminate all background processes and release node resources. It then deletes temporary directories, ensuring a clean exit that adheres to HPC storage quotas and prevents lingering processes.
+
+```sh
+#!/bin/bash -l
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=00:30:00
+#SBATCH --partition=plgrid
+#SBATCH --account=plglscclass26-cpu
+#SBATCH --output=ray_cluster_%j.out
+
+conda activate rayenv
+
+export RAY_TMPDIR=/tmp/ray_$SLURM_JOB_ID
+mkdir -p $RAY_TMPDIR
+export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
+
+nodes=($(scontrol show hostnames $SLURM_JOB_NODELIST))
+head=${nodes[0]}
+head_ip=$(srun --nodes=1 --ntasks=1 -w "$head" hostname -I | awk '{print $1}')
+port=6379
+
+echo "=== Starting Ray Head Node ==="
+srun -N1 -n1 -w "$head" \
+    ray start \
+    --head \
+    --node-ip-address="$head_ip" \
+    --port=$port \
+    --num-cpus=$SLURM_CPUS_PER_TASK \
+    --temp-dir=$RAY_TMPDIR \
+    --include-dashboard=false \
+    --block &
+
+sleep 15
+
+echo "=== Starting Ray Worker Nodes ==="
+for worker in "${nodes[@]:1}"; do
+    srun -N1 -n1 -w "$worker" \
+        ray start \
+        --address="$head_ip:$port" \
+        --num-cpus=$SLURM_CPUS_PER_TASK \
+        --temp-dir=$RAY_TMPDIR \
+        --block &
+done
+
+sleep 5
+
+echo "=== Running Ray Tune Experiment ==="
+python run_ray_tune.py
+EXIT_CODE=$?
+
+ray stop
+rm -rf $RAY_TMPDIR
+exit $EXIT_CODE
+```
 
 ## 7. Exercise
 
 Using the provided scripts, run a full benchmarking experiment comparing:
 
-- **Baseline method:** random (naive) hyperparameter search  
+- **Baseline method:** random (naive) hyperparameter search
 - **Optimized method:** Ray Tune-based hyperparameter optimization
 
 You are free to modify experimental settings such as:
@@ -228,13 +366,13 @@ You are free to modify experimental settings such as:
 
 To run benchamark use
 ```bash
-sbatch baseline_job.sh 
+sbatch baseline_job.sh
 sbatch ray_job.sh
 ```
 ## 8. Homework
 Using the dataset below, repeat the full benchmarking pipeline:
 
- Dataset:  
+ Dataset:
 https://www.kaggle.com/datasets/prakharrathi25/banking-dataset-marketing-targets
 
 Choose any classification model (recommended: XGBoost, LightGBM, or RandomForest) and perform hyperparameter optimization using:
