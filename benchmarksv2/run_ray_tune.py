@@ -27,20 +27,20 @@ def log_resources():
 def objective(config):
     """Training objective with timing, resource tracking, and type fixing for BayesOpt"""
     start = time.time()
-    
+
     # Create a local copy to modify parameters safely
     trainer_config = config.copy()
-    
+
     # Cast float domains from BayesOpt back into integers for XGBoost
     trainer_config["n_estimators"] = int(np.round(config["n_estimators"]))
     trainer_config["max_depth"] = int(np.round(config["max_depth"]))
-    
+
     # Execute training
     score = train_model(trainer_config)
-    
+
     duration = time.time() - start
     resources_end = log_resources()
-    
+
     tune.report({
         "accuracy": score,
         "training_time": duration,
@@ -50,17 +50,17 @@ def objective(config):
 
 def main():
     set_seeds(42)
-    
+
     # Initialize Ray
     print("Connecting to Ray cluster...")
     ray.init(address="auto")
-    
+
     # Log cluster information
     print("\n=== Ray Cluster Status ===")
     print(f"Cluster resources: {ray.cluster_resources()}")
     print(f"Available nodes: {len(ray.nodes())}")
     print("=" * 50)
-    
+
     # Generate and pin synthetic dataset to shared memory
     print("start data",time.time())
     X, y = load_and_preprocess_data()
@@ -68,7 +68,7 @@ def main():
 
     X_ref = ray.put(X)
     y_ref = ray.put(y)
-    
+
     # Define search space (using continuous distributions to keep BayesOpt happy)
     search_space = {
         "n_estimators": tune.uniform(100, 1000),
@@ -78,7 +78,7 @@ def main():
         "data_y": y_ref,
         "num_cpus": 15  # Match the resource request token below
     }
-    
+
     # Configure ASHA scheduler
     scheduler = ASHAScheduler(
         metric="accuracy",
@@ -88,30 +88,23 @@ def main():
         reduction_factor=3,
         brackets=1
     )
-    
-    # Configure Bayesian Optimization search
-    search_alg = BayesOptSearch(
-        metric="accuracy",
-        mode="max",
-        random_search_steps=4
-    )
-    
+
+
     # Create results directory
     storage_path = os.path.expandvars("$SCRATCH/ray_results")
     os.makedirs(storage_path, exist_ok=True)
-    
+
     print(f"\nResults will be saved to: {storage_path}")
     print(f"Starting hyperparameter optimization with 200 samples...")
-    
+
     experiment_start = time.time()
-    
+
     # Configure and run tuner matching your 4-node benchmark allocation
     tuner = tune.Tuner(
         tune.with_resources(objective, {"cpu": 16}),
         param_space=search_space,
         tune_config=tune.TuneConfig(
             scheduler=scheduler,
-            search_alg=search_alg,
             num_samples=10,
             max_concurrent_trials=4  # 4 concurrent trials * 15 CPUs = 60/64 CPUs utilized
         ),
@@ -121,17 +114,17 @@ def main():
             verbose=1
         )
     )
-    
+
     results = tuner.fit()
     experiment_duration = time.time() - experiment_start
-    
+
     # Fetch best trial outcome
     best = results.get_best_result(metric="accuracy", mode="max")
     df = results.get_dataframe()
-    
+
     # Clean the dataset references out of configuration logs before export
     clean_best_config = {k: v for k, v in best.config.items() if not k.startswith("data_")}
-    
+
     # Calculate complete performance statistics
     summary = {
         "method": "ray_tune",
@@ -149,12 +142,12 @@ def main():
         "cluster_resources": str(ray.cluster_resources()),
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
-    
+
     # Save statistics output file
     summary_file = os.path.join(storage_path, "ray_tune_summary.json")
     with open(summary_file, 'w') as f:
         json.dump(summary, f, indent=2)
-    
+
     # Print results summary block
     print("\n" + "=" * 60)
     print("RAY TUNE OPTIMIZATION COMPLETE")
@@ -174,7 +167,7 @@ def main():
     print(f"  Iterations to best: {summary['iterations_to_best']}")
     print(f"\nResults saved to: {summary_file}")
     print("=" * 60)
-    
+
     ray.shutdown()
     return 0
 

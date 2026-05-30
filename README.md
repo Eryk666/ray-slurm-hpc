@@ -1,17 +1,14 @@
 # Lab: Scalable Hyperparameter Optimization with Ray Tune
 
 ## 1. Ray & Ray Tune
-
 Before diving into the code, you need to understand the architectural layer we are adding on top of standard Python.
 
 ### What is Ray?
-
 **Ray** is an open-source, distributed execution framework designed to scale Python applications from a single laptop to a massive High-Performance Computing (HPC) cluster. It completely abstracts away the complexities of traditional network programming, socket management, and manual data synchronization.
 
 ---
 
 ### Key Components of Ray Architecture
-
 * **The Head Node:** The central orchestrator of the cluster. It hosts the Global Control Store (GCS), which tracks the location of data objects, worker states, and tasks across the entire network.
 * **Worker Nodes:** The physical or virtual cluster machines (e.g., your Slurm allocated nodes) that receive and execute the actual computation payloads.
 * **Tasks (Stateless Parallelism):** Functions executed asynchronously across the cluster using the `@ray.remote` decorator.
@@ -26,7 +23,6 @@ Building on top of Ray's core ecosystem, **Ray Tune** is a library specifically 
 When training machine learning models, finding the optimal combination of configuration parameters (like learning rates, tree depths, or network architectures) requires running hundreds of independent training cycles. Ray Tune automates this process cleanly by turning hyperparameter search into a distributed scheduling problem.
 
 ### The Ray Tune Workflow
-
 [ Search Space Definitions ] ──> ( Search Algorithm / BayesOpt )
 │
 ▼
@@ -40,7 +36,6 @@ When training machine learning models, finding the optimal combination of config
 * **Trial Schedulers:** Implements aggressive early-stopping routines like **ASHA (Asynchronous Successive Halving Algorithm)**. ASHA continuously evaluates live trials against each other. If a configuration is performing poorly, ASHA terminates it mid-flight, freeing up cluster cores to instantly pull a new configuration from the search algorithm.
 
 ## 2. Environment Setup
-
 To run distributed machine learning workloads seamlessly across an HPC cluster, all computing nodes must run identical software versions. We will use a **Conda environment** to isolate our dependencies and prevent package conflicts.
 
 Log into your cluster terminal and execute the following commands to initialize your environment using Python 3.10 and install all requirements provided in file `reqiuremnts.txt`:
@@ -59,8 +54,8 @@ conda activate rayenv
 # Install the dependencies via pip
 pip install -r requirements.txt
 ```
-## 3. Hyperparameter Tuning & XGBoost
 
+## 3. Hyperparameter Tuning & XGBoost
 To optimize machine learning pipelines on a cluster, you must understand what parameters we are tuning and why the underlying algorithm is chosen for high-performance benchmarks.
 
 ### Understanding Hyperparameter Tuning
@@ -84,7 +79,6 @@ Instead of training one massive, complex model, XGBoost uses an ensemble techniq
 4. This sequential process repeats hundreds of times, adding trees together to form a highly accurate final model.
 
 ## 4. Model training
-
 Now that the architectural concepts are established, we can examine how they materialize in actual code. The following implementation represents the computational unit that Ray Tune will repeatedly execute across the cluster.
 
 Unlike a traditional sequential machine learning script where data is loaded and a model is trained exactly once, Ray Tune transforms the training process into a **distributed trial execution system**, where the same training function is instantiated many times in parallel, each with a different hyperparameter configuration.
@@ -202,7 +196,6 @@ python -u run_baseline.py
 As you can see script is pretty small and easy to understand.
 
 ## 6. Ray
-
 Now we transition from the baseline to **Ray Tune**, which transforms your cluster into a single, cohesive optimization engine. While the baseline runs independent tasks that don't talk to each other, **Ray Tune** uses a centralized orchestrator to make "smart" decisions in real-time.
 
 We wrap our training logic in an objective function which reports results back to Ray using `tune.report()`. This feedback loop allows the scheduler to see how a trial is performing while it is still running.
@@ -233,8 +226,6 @@ The dataset is moved into shared memory using `ray.put()`. This stores the data 
 Hyperparameter ranges are defined using a search space with distributions like `tune.uniform` and `tune.loguniform` to explore different model configurations.
 
 The tuner uses a scheduler (ASHA) that identifies and terminates underperforming trials early to conserve cluster resources.
-
-The next configuration to try is selected by the search algorithm, which uses performance data from previous trials to navigate toward more optimal areas of the search space.
 
 Finally, calling `tuner.fit()` launches the distributed execution, managing the parallel trials across the cluster.
 
@@ -351,7 +342,6 @@ exit $EXIT_CODE
 ```
 
 ## 7. Exercise
-
 Using the provided scripts, run a full benchmarking experiment comparing:
 
 - **Baseline method:** random (naive) hyperparameter search
@@ -369,30 +359,30 @@ To run benchamark use
 sbatch baseline_job.sh
 sbatch ray_job.sh
 ```
+
+
+
 ## 8. Homework
-Using the dataset below, repeat the full benchmarking pipeline:
+Using the [Polish Companies Bankruptcy](https://archive.ics.uci.edu/dataset/365/polish+companies+bankruptcy+data), repeat the full benchmarking pipeline.
 
- Dataset:
-https://www.kaggle.com/datasets/prakharrathi25/banking-dataset-marketing-targets
-
-Choose any classification model (recommended: XGBoost, LightGBM, or RandomForest) and perform hyperparameter optimization using:
-
-- Naive random search
-- Ray Tune optimization
+```sh
+wget https://archive.ics.uci.edu/static/public/365/polish+companies+bankruptcy+data.zip -O $SCRATCH/data.zip
+```
 
 Ensure identical preprocessing steps for both methods to maintain fair comparison.
 
-## Questions:
-#### a) Performance comparison
+Create a report in which you answer the following questions:
+
+a) Performance comparison
 - Which method achieved the best performance overall?
 - At which trial iteration was the best configuration discovered?
 - Did Ray Tune converge faster than random search?
 
-
-#### b) Efficiency analysis
+b) Efficiency analysis
 - Was Ray Tune faster than naive search in reaching strong results?
 - Why? Why not?
 - Take a look into `hpc-jobs-history` what was total CPU time taken for each method? Why does it differ from wall time? Why does it matter for HPC?
+
 ## Submission
 As your subbmission provide:
 - All files you created and/or modified
