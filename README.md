@@ -64,31 +64,18 @@ Log into your cluster terminal and execute the following commands to initialize 
 
 
 ```bash
-
 # Create a new, clean conda environment named 'rayenv'
-
 conda create -y -n rayenv python=3.10
 
-
-
 # Initialize your shell for conda usage (if not done previously)
-
 conda init bash
-
 source ~/.bashrc
 
-
-
 # Activate the environment
-
 conda activate rayenv
 
-
-
 # Install the dependencies via pip
-
 pip install -r requirements.txt
-
 ```
 
 
@@ -154,17 +141,11 @@ Conceptually:
 
 
 ```
-
 Trial 1 → {learning_rate=0.01, max_depth=6}
-
 Trial 2 → {learning_rate=0.05, max_depth=8}
-
 Trial 3 → {learning_rate=0.2,  max_depth=4}
-
 Trial 4 → {learning_rate=0.005,max_depth=12}
-
 ...
-
 ```
 
 
@@ -174,53 +155,29 @@ Each trial executes an independent copy of the function below somewhere on the c
 
 
 ```python
-
 def train_model(config):
-
     X = config["data_X"]
-
     y = config["data_y"]
 
-
-
     if isinstance(X, ray.ObjectRef):
-
         X = ray.get(X)
-
     if isinstance(y, ray.ObjectRef):
-
         y = ray.get(y)
-
-
 
     num_cpus = config.get("num_cpus", 16)
 
-
-
     model = XGBClassifier(
-
         n_estimators=config["n_estimators"],
-
         max_depth=config["max_depth"],
-
         learning_rate=config["learning_rate"],
-
         tree_method="hist",
-
         n_jobs=num_cpus,
-
         verbosity=0,
-
         random_state=42
-
     )
 
-
-
     scores = cross_val_score(model, X, y, cv=3, n_jobs=1)
-
     return np.mean(scores)
-
 ```
 
 To make sure this function will work for baseline and ray job, we make sure if `X` and `y` are reffreences for ray storage in case of ray job, or plain data in case of baseline job.
@@ -228,15 +185,10 @@ To make sure this function will work for baseline and ray job, we make sure if `
 
 
 ```python
-
 if isinstance(X, ray.ObjectRef):
-
     X = ray.get(X)
-
 if isinstance(y, ray.ObjectRef):
-
     y = ray.get(y)
-
 ```
 
 ## 5. Baseline
@@ -270,67 +222,33 @@ Below we can see the implementation of that:
 
 
 ```python
-
 def run_baseline_trial(trial_id, num_samples=50 ,seed=None):
-
     if seed is None:
-
         seed=trial_id*42
-
     set_seeds(seed)
-
-
 
     X, y = load_and_preprocess_data()
 
-
-
     results = []
 
-
-
     for i in range(num_samples):
-
-
-
         config = {
-
             "n_estimators": random.randint(100, 1000),
-
             "max_depth": random.randint(4, 15),
-
             "learning_rate": 10 ** random.uniform(-4, -1),
-
             "data_X": X,
-
             "data_y": y,
-
             "num_cpus": 16,
-
         }
-
-
-
         score = train_model(config)
-
-
-
         results.append(
-
             {
-
                 "config": config,
-
                 "accuracy": score,
-
             }
-
         )
 
-
-
     return results
-
 ```
 
 
@@ -338,33 +256,19 @@ def run_baseline_trial(trial_id, num_samples=50 ,seed=None):
 To run this code on Ares we are going to use scrfipt dedicated for SLURM. In the script below we declare an array job that will run on 4 nodes and giving each node one task to try to match ray worker nodes architecture for the best comparision. For each task node can use up to 16 cpu.
 
 ```bash
-
 #!/bin/bash -l
-
 #SBATCH --array=1-4
-
 #SBATCH --nodes=1
-
 #SBATCH --ntasks-per-node=1
-
 #SBATCH --cpus-per-task=16
-
 #SBATCH --time=00:30:00
-
 #SBATCH --partition=plgrid
-
 #SBATCH --account=plglscclass26-cpu
-
 #SBATCH --output=baseline_%A_%a.out
-
-
 
 conda activate rayenv
 
-
-
 python -u run_baseline.py
-
 ```
 
 
@@ -386,41 +290,23 @@ We wrap our training logic in an objective function which reports results back t
 ```python
 
 def objective(config):
-
     start = time.time()
 
-
-
     trainer_config = config.copy()
-
     trainer_config["n_estimators"] = int(np.round(config["n_estimators"]))
-
     trainer_config["max_depth"] = int(np.round(config["max_depth"]))
-
-
 
     score = train_model(trainer_config)
 
-
-
     duration = time.time() - start
-
     resources_end = log_resources()
 
-
-
     tune.report({
-
         "accuracy": score,
-
         "training_time": duration,
-
         "cpu_usage": resources_end["cpu_percent"],
-
         "memory_gb": resources_end["memory_gb"]
-
     })
-
 ```
 
 
@@ -442,99 +328,52 @@ Finally, calling `tuner.fit()` launches the distributed execution, managing the 
 
 
 ```python
-
 X, y = load_and_preprocess_data()
 
-
-
 X_ref = ray.put(X)
-
 y_ref = ray.put(y)
 
-
-
 search_space = {
-
     "n_estimators": tune.uniform(100, 1000),
-
     "max_depth": tune.uniform(4, 15),
-
     "learning_rate": tune.loguniform(1e-4, 1e-1),
-
     "data_X": X_ref,
-
     "data_y": y_ref,
-
     "num_cpus": 15,
-
 }
 
-
-
 scheduler = ASHAScheduler(
-
     metric="accuracy",
-
     mode="max",
-
     max_t=100,
-
     grace_period=10,
-
     reduction_factor=3,
-
     brackets=1
-
 )
-
-
 
 search_alg = BayesOptSearch(
-
     metric="accuracy",
-
     mode="max",
-
     random_search_steps=4
-
 )
 
-
-
 tuner = tune.Tuner(
-
         tune.with_resources(objective, {"cpu": 16}),
-
         param_space=search_space,
-
         tune_config=tune.TuneConfig(
-
             scheduler=scheduler,
-
             search_alg=search_alg,
-
             num_samples=10,
-
             max_concurrent_trials=4
-
         ),
-
         run_config=tune.RunConfig(
-
             name="xgb_hpo",
-
             storage_path=storage_path,
-
             verbose=1
-
         )
-
     )
 
-
-
 results = tuner.fit()
-
 ```
 
 
@@ -556,111 +395,58 @@ After the Python script finishes, the script calls `ray stop` to terminate all b
 
 
 ```sh
-
 #!/bin/bash -l
-
 #SBATCH --nodes=4
-
 #SBATCH --ntasks-per-node=1
-
 #SBATCH --cpus-per-task=16
-
 #SBATCH --time=00:30:00
-
 #SBATCH --partition=plgrid
-
 #SBATCH --account=plglscclass26-cpu
-
 #SBATCH --output=ray_cluster_%j.out
-
-
 
 conda activate rayenv
 
-
-
 export RAY_TMPDIR=/tmp/ray_$SLURM_JOB_ID
-
 mkdir -p $RAY_TMPDIR
-
 export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
 
-
-
 nodes=($(scontrol show hostnames $SLURM_JOB_NODELIST))
-
 head=${nodes[0]}
-
 head_ip=$(srun --nodes=1 --ntasks=1 -w "$head" hostname -I | awk '{print $1}')
-
 port=6379
 
-
-
 echo "=== Starting Ray Head Node ==="
-
 srun -N1 -n1 -w "$head" \
-
     ray start \
-
     --head \
-
     --node-ip-address="$head_ip" \
-
     --port=$port \
-
     --num-cpus=$SLURM_CPUS_PER_TASK \
-
     --temp-dir=$RAY_TMPDIR \
-
     --include-dashboard=false \
-
     --block &
-
-
 
 sleep 15
 
-
-
 echo "=== Starting Ray Worker Nodes ==="
-
 for worker in "${nodes[@]:1}"; do
-
     srun -N1 -n1 -w "$worker" \
-
         ray start \
-
         --address="$head_ip:$port" \
-
         --num-cpus=$SLURM_CPUS_PER_TASK \
-
         --temp-dir=$RAY_TMPDIR \
-
         --block &
-
 done
-
-
 
 sleep 5
 
-
-
 echo "=== Running Ray Tune Experiment ==="
-
 python run_ray_tune.py
-
 EXIT_CODE=$?
 
-
-
 ray stop
-
 rm -rf $RAY_TMPDIR
-
 exit $EXIT_CODE
-
 ```
 
 
@@ -694,11 +480,8 @@ You are free to modify experimental settings such as:
 To run benchamark use
 
 ```bash
-
 sbatch baseline_job.sh
-
 sbatch ray_job.sh
-
 ```
 
 
@@ -714,9 +497,7 @@ Using the [Polish Companies Bankruptcy](https://archive.ics.uci.edu/dataset/365/
 
 
 ```sh
-
 wget https://archive.ics.uci.edu/static/public/365/polish+companies+bankruptcy+data.zip -O $SCRATCH/data.zip
-
 ```
 
 
