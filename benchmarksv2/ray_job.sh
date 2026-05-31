@@ -43,8 +43,11 @@ done
 
 sleep 5
 
+NUM_NODES=$SLURM_NNODES
+TOTAL_TRIALS=200
+
 echo "=== Running Ray Tune Experiment ==="
-python run_ray_tune.py
+python run_ray_tune.py $NUM_NODES $TOTAL_TRIALS
 EXIT_CODE=$?
 
 ray stop

@@ -2,6 +2,7 @@ import random
 import json
 import os
 import gc
+import sys
 import time
 import numpy as np
 import psutil
@@ -22,11 +23,12 @@ def log_resources():
         "memory_gb": round(psutil.virtual_memory().used / (1024**3), 2)
     }
 
-def run_baseline_trial(trial_id, num_samples=50, seed=None):
+def run_baseline_trial(num_nodes, trial_id, num_samples=50, seed=None):
     """
     Run baseline random search trial synchronized with the Ray Tune environment.
-    
+
     Args:
+        num_nodes: Total number of nodes in the experiment (used for logging and storage path organization)
         trial_id: Trial identifier (from SLURM array task)
         num_samples: Number of configurations to evaluate (50 per worker x 4 nodes = 200 total)
         seed: Random seed (if None, uses trial_id * 42)
@@ -34,7 +36,7 @@ def run_baseline_trial(trial_id, num_samples=50, seed=None):
     if seed is None:
         seed = trial_id * 42
     set_seeds(seed)
-    
+
     print("=" * 60)
     print(f"BASELINE WORKER TRIAL {trial_id}")
     print("=" * 60)
@@ -42,21 +44,21 @@ def run_baseline_trial(trial_id, num_samples=50, seed=None):
     print(f"Number of samples per node: {num_samples}")
     print(f"Starting at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60 + "\n")
-    
+
     # Generate the shared synthetic dataset locally ONCE per Slurm task to prevent I/O bottlenecks
     X, y = load_and_preprocess_data()
-    
+
     # Establish dynamic scratch workspace path
-    storage_path = os.path.expandvars("$SCRATCH/baseline_results")
+    storage_path = os.path.expandvars(f"$SCRATCH/baseline_results/{num_nodes}")
     os.makedirs(storage_path, exist_ok=True)
-    
+
     results = []
     trial_start_time = time.time()
     best_so_far = 0
-    
+
     # Progress bar setup
     pbar = tqdm(range(num_samples), desc=f"Worker Node {trial_id}")
-    
+
     for i in pbar:
         # Construct configuration block mapping the required resources and clean dataset references
         config = {
@@ -67,22 +69,22 @@ def run_baseline_trial(trial_id, num_samples=50, seed=None):
             "data_y": y,
             "num_cpus": 16  # Baseline uses all 16 allocated cores completely for XGBoost training
         }
-        
+
         resources_start = log_resources()
         sample_start = time.time()
-        
+
         # Train model
         score = train_model(config)
-        
+
         sample_duration = time.time() - sample_start
         resources_end = log_resources()
-        
+
         if score > best_so_far:
             best_so_far = score
-        
+
         # Clean config logs to prevent dumping raw dataset matrices into JSON records
         clean_config = {k: v for k, v in config.items() if not k.startswith("data_")}
-        
+
         # Store clean result metrics
         result = {
             "sample_id": i + 1,
@@ -93,28 +95,28 @@ def run_baseline_trial(trial_id, num_samples=50, seed=None):
             "memory_gb": resources_end["memory_gb"]
         }
         results.append(result)
-        
+
         # Update progress visual interface
         pbar.set_postfix({
             "acc": f"{score:.4f}",
             "best": f"{best_so_far:.4f}",
             "time": f"{sample_duration:.1f}s"
         })
-        
+
         # Actively clear iteration space arrays out of RAM
         gc.collect()
-    
+
     pbar.close()
-    
+
     total_time = time.time() - trial_start_time
-    
+
     # Calculate performance statistics
     accuracies = [r["accuracy"] for r in results]
     training_times = [r["training_time"] for r in results]
-    
+
     best_result = max(results, key=lambda x: x["accuracy"])
     best_index = accuracies.index(best_result["accuracy"])
-    
+
     summary = {
         "trial_id": trial_id,
         "seed": seed,
@@ -135,12 +137,12 @@ def run_baseline_trial(trial_id, num_samples=50, seed=None):
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "results": results
     }
-    
+
     # Save detailed data summary log
     output_file = os.path.join(storage_path, f"baseline_results_trial_{trial_id}.json")
     with open(output_file, 'w') as f:
         json.dump(summary, f, indent=2)
-    
+
     # Print results summary block
     print("\n" + "=" * 60)
     print(f"TRIAL {trial_id} COMPLETE")
@@ -159,12 +161,12 @@ def run_baseline_trial(trial_id, num_samples=50, seed=None):
     print(f"  Time to find best: {summary['time_to_best_seconds']:.2f}s")
     print(f"\nResults saved to: {output_file}")
     print("=" * 60)
-    
+
     return summary
 
 if __name__ == "__main__":
-    # Fetch job task tracking variables directly from Slurm context environment
-    trial_id = int(os.environ.get("SLURM_ARRAY_TASK_ID", 1))
-    
-    # 4 array nodes evaluating 50 iterations each totals 200 evaluations
-    run_baseline_trial(trial_id, num_samples=50)
+    num_nodes = int(sys.argv[1])
+    trial_id = int(sys.argv[2])
+    num_samples = int(sys.argv[3])
+
+    run_baseline_trial(num_nodes, trial_id, num_samples=num_samples)

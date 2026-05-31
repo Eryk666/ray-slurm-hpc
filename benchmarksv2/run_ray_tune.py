@@ -1,3 +1,5 @@
+import sys
+
 import ray
 from ray import tune
 from ray.tune.schedulers import ASHAScheduler
@@ -50,6 +52,8 @@ def objective(config):
 
 def main():
     set_seeds(42)
+    num_nodes = int(sys.argv[1])
+    total_samples = int(sys.argv[2])
 
     # Initialize Ray
     print("Connecting to Ray cluster...")
@@ -91,11 +95,11 @@ def main():
 
 
     # Create results directory
-    storage_path = os.path.expandvars("$SCRATCH/ray_results")
+    storage_path = os.path.expandvars(f"$SCRATCH/ray_results/{num_nodes}")
     os.makedirs(storage_path, exist_ok=True)
 
     print(f"\nResults will be saved to: {storage_path}")
-    print(f"Starting hyperparameter optimization with 200 samples...")
+    print(f"Starting hyperparameter optimization with {total_samples} samples...")
 
     experiment_start = time.time()
 
@@ -105,8 +109,8 @@ def main():
         param_space=search_space,
         tune_config=tune.TuneConfig(
             scheduler=scheduler,
-            num_samples=10,
-            max_concurrent_trials=4  # 4 concurrent trials * 15 CPUs = 60/64 CPUs utilized
+            num_samples=total_samples,
+            max_concurrent_trials=num_nodes  # 4 concurrent trials * 15 CPUs = 60/64 CPUs utilized
         ),
         run_config=tune.RunConfig(
             name="xgb_hpo",
