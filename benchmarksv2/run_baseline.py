@@ -23,7 +23,7 @@ def log_resources():
         "memory_gb": round(psutil.virtual_memory().used / (1024**3), 2)
     }
 
-def run_baseline_trial(num_nodes, trial_id, num_samples=50, seed=None):
+def run_baseline_trial(num_nodes, trial_id, num_samples=50, seed=None, data_path=None):
     """
     Run baseline random search trial synchronized with the Ray Tune environment.
 
@@ -32,6 +32,7 @@ def run_baseline_trial(num_nodes, trial_id, num_samples=50, seed=None):
         trial_id: Trial identifier (from SLURM array task)
         num_samples: Number of configurations to evaluate (50 per worker x 4 nodes = 200 total)
         seed: Random seed (if None, uses trial_id * 42)
+        data_path: Path to the dataset file (if empty or None, generates synthetic data)
     """
     if seed is None:
         seed = trial_id * 42
@@ -46,7 +47,7 @@ def run_baseline_trial(num_nodes, trial_id, num_samples=50, seed=None):
     print("=" * 60 + "\n")
 
     # Generate the shared synthetic dataset locally ONCE per Slurm task to prevent I/O bottlenecks
-    X, y = load_and_preprocess_data()
+    X, y = load_and_preprocess_data(data_path)
 
     # Establish dynamic scratch workspace path
     storage_path = os.path.expandvars(f"$SCRATCH/baseline_results/{num_nodes}")
@@ -168,5 +169,6 @@ if __name__ == "__main__":
     num_nodes = int(sys.argv[1])
     trial_id = int(sys.argv[2])
     num_samples = int(sys.argv[3])
+    data_path = sys.argv[4] if len(sys.argv) > 4 else None
 
-    run_baseline_trial(num_nodes, trial_id, num_samples=num_samples)
+    run_baseline_trial(num_nodes, trial_id, num_samples=num_samples, data_path=data_path)

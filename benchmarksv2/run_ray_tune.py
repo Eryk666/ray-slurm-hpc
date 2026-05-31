@@ -54,6 +54,7 @@ def main():
     set_seeds(42)
     num_nodes = int(sys.argv[1])
     total_samples = int(sys.argv[2])
+    data_path = sys.argv[3] if len(sys.argv) > 3 else None
 
     # Initialize Ray
     print("Connecting to Ray cluster...")
@@ -67,7 +68,7 @@ def main():
 
     # Generate and pin synthetic dataset to shared memory
     print("start data",time.time())
-    X, y = load_and_preprocess_data()
+    X, y = load_and_preprocess_data(data_path)
     print("end data",time.time())
 
     X_ref = ray.put(X)
