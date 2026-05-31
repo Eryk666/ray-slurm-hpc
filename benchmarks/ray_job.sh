@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --nodes=2
+#SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=16
 #SBATCH --time=00:30:00
 #SBATCH --partition=plgrid
 #SBATCH --account=plglscclass26-cpu
@@ -15,20 +15,10 @@ export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
 
 nodes=($(scontrol show hostnames $SLURM_JOB_NODELIST))
 head=${nodes[0]}
-
 head_ip=$(srun --nodes=1 --ntasks=1 -w "$head" hostname -I | awk '{print $1}')
-port=6379
+port=$(( 40000 + (SLURM_JOB_ID % 10000) ))
 
-echo "=== Ray Cluster Configuration ==="
-echo "HEAD NODE: $head"
-echo "HEAD IP: $head_ip"
-echo "WORKER NODES: ${nodes[@]:1}"
-echo "CPUS PER NODE: $SLURM_CPUS_PER_TASK"
-echo "TEMP DIR: $RAY_TMPDIR"
-echo "================================="
-
-# Start head node
-echo "Starting head node..."
+echo "=== Starting Ray Head Node ==="
 srun -N1 -n1 -w "$head" \
     ray start \
     --head \
@@ -39,42 +29,28 @@ srun -N1 -n1 -w "$head" \
     --include-dashboard=false \
     --block &
 
-sleep 25
+sleep 15
 
+echo "=== Starting Ray Worker Nodes ==="
 for worker in "${nodes[@]:1}"; do
-    echo "Starting worker: $worker"
     srun -N1 -n1 -w "$worker" \
         ray start \
         --address="$head_ip:$port" \
         --num-cpus=$SLURM_CPUS_PER_TASK \
         --temp-dir=$RAY_TMPDIR \
         --block &
-    sleep 5
 done
 
-sleep 15
+sleep 5
 
-echo "Verifying cluster..."
-python -c "import ray; ray.init(address='auto'); print('Cluster resources:', ray.cluster_resources()); ray.shutdown()" || {
-    echo "ERROR: Failed to connect to Ray cluster"
-    ray stop
-    exit 1
-}
+DATA_PATH=""
+TOTAL_TRIALS=200
+NUM_NODES=$SLURM_NNODES
 
-echo "Starting Ray Tune experiment..."
-python run_ray_tune.py
-
+echo "=== Running Ray Tune Experiment ==="
+python run_ray_tune.py $NUM_NODES $TOTAL_TRIALS $DATA_PATH
 EXIT_CODE=$?
 
-echo "Stopping Ray cluster..."
 ray stop
-
 rm -rf $RAY_TMPDIR
-
-if [ $EXIT_CODE -eq 0 ]; then
-    echo "Experiment completed successfully!"
-else
-    echo "Experiment failed with exit code $EXIT_CODE"
-fi
-
 exit $EXIT_CODE
