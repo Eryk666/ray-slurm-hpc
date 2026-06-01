@@ -5,6 +5,7 @@
 ### What is Ray?
 
 Ray is an open-source, distributed execution framework designed to scale Python applications from a single laptop to a massive High-Performance Computing (HPC) cluster. It completely abstracts away the complexities of traditional network programming, socket management, and manual data synchronization.
+Ray is widely used in production environments by companies that need to scale machine learning and distributed computing workloads. For example, OpenAI has used Ray to support large-scale AI training and experimentation, while Uber adopted Ray to simplify distributed machine learning and hyperparameter tuning across its infrastructure. Shopify uses Ray to power machine learning applications such as product classification and recommendation systems, and Spotify leverages it to scale data processing and model training workflows. Other companies, including Netflix, Instacart, Pinterest, and ByteDance, have also used Ray for tasks ranging from recommendation engines and data analytics to large-scale AI model development. These real-world deployments demonstrate how Ray enables organizations to efficiently utilize clusters of CPUs and GPUs while providing a developer-friendly framework for building scalable distributed applications.
 
 ![image](./img/ray.png)
 
